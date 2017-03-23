@@ -34,13 +34,14 @@
 -export([add_vhost_msg_store/1]).
 
 %% exported for testing only
--export([start_msg_store/2, stop_msg_store/0, init/6]).
+-export([start_msg_store/3, stop_msg_store/0, init/6]).
 
 -export([move_messages_to_vhost_store/0]).
 -export([stop_vhost_msg_store/1]).
 -include_lib("stdlib/include/qlc.hrl").
 
 -define(QUEUE_MIGRATION_BATCH_SIZE, 100).
+-define(MSG_STORE_MODULE_FILE, "msg_store_module").
 
 %%----------------------------------------------------------------------------
 %% Messages, and their position in the queue, can be in memory or on
@@ -499,15 +500,36 @@ start(DurableQueues) ->
         end,
         {DurableQueues, #{}},
         AllTerms),
-    start_msg_store(VhostRefs, StartFunState),
+    IsEmpty = DurableQueues == [],
+    start_msg_store(VhostRefs, StartFunState, IsEmpty),
     {ok, AllTerms}.
 
 stop() ->
     ok = stop_msg_store(),
     ok = rabbit_queue_index:stop().
 
-start_msg_store(Refs, StartFunState) when is_map(Refs); Refs == undefined ->
+start_msg_store(Refs, StartFunState, IsEmpty) when is_map(Refs); Refs == undefined ->
     MsgStoreModule = application:get_env(rabbit, msg_store_module, rabbit_msg_store),
+    case rabbit_file:read_term_file(msg_store_module_file()) of
+        %% The same message store module
+        {ok, [MsgStoreModule]} -> ok;
+        %% Fresh message store
+        {error, enoent} -> ok;
+        {ok, [OldModule]} ->
+            case IsEmpty of
+                %% There is no data in the old message store.
+                %% So it's safe to start with the new one
+                true  -> ok;
+                false ->
+                    error({msg_store_module_mismatch,
+                           MsgStoreModule,
+                           OldModule})
+            end;
+        Other ->
+            error(Other)
+    end,
+    rabbit_file:read_term_file(msg_store_module_file(),
+                                [MsgStoreModule]),
     rabbit_log:info("Using ~p to provide message store", [MsgStoreModule]),
     ok = rabbit_sup:start_child(?TRANSIENT_MSG_STORE_SUP, rabbit_msg_store_vhost_sup,
                                 [?TRANSIENT_MSG_STORE_SUP,
@@ -527,7 +549,13 @@ start_msg_store(Refs, StartFunState) when is_map(Refs); Refs == undefined ->
         add_vhost_msg_store(Vhost)
     end,
     lists:sort(VHosts)),
+    %% When message store is started, we can save a module
+    rabbit_file:write_term_file(msg_store_module_file(),
+                                [MsgStoreModule]),
     ok.
+
+msg_store_module_file() ->
+    filename:join(rabbit_mnesia:dir(), ?MSG_STORE_MODULE_FILE).
 
 add_vhost_msg_store(VHost) ->
     rabbit_log:info("Starting message stores for vhost '~s'~n", [VHost]),
@@ -2827,6 +2855,8 @@ move_messages_to_vhost_store() ->
 
     ok = rabbit_queue_index:stop(),
     ok = rabbit_sup:stop_child(NewStoreSup),
+    %% Specify old message store module.
+    rabbit_file:write_term_file(msg_store_module_file(), [rabbit_msg_store]),
     ok.
 
 in_batches(Size, MFA, List, MessageStart, MessageEnd) ->
