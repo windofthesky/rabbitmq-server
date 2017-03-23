@@ -528,8 +528,6 @@ start_msg_store(Refs, StartFunState, IsEmpty) when is_map(Refs); Refs == undefin
         Other ->
             error(Other)
     end,
-    rabbit_file:read_term_file(msg_store_module_file(),
-                                [MsgStoreModule]),
     rabbit_log:info("Using ~p to provide message store", [MsgStoreModule]),
     ok = rabbit_sup:start_child(?TRANSIENT_MSG_STORE_SUP, rabbit_msg_store_vhost_sup,
                                 [?TRANSIENT_MSG_STORE_SUP,
@@ -550,8 +548,7 @@ start_msg_store(Refs, StartFunState, IsEmpty) when is_map(Refs); Refs == undefin
     end,
     lists:sort(VHosts)),
     %% When message store is started, we can save a module
-    rabbit_file:write_term_file(msg_store_module_file(),
-                                [MsgStoreModule]),
+    rabbit_file:write_term_file(msg_store_module_file(), [MsgStoreModule]),
     ok.
 
 msg_store_module_file() ->
