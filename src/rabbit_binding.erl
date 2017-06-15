@@ -22,7 +22,7 @@
          list_for_source_and_destination/2]).
 -export([new_deletions/0, combine_deletions/2, add_deletion/3,
          process_deletions/2]).
--export([info_keys/0, info/1, info/2, info_all/1, info_all/2, info_all/4]).
+-export([info_keys/0, info/1, info/2, info_all/1, info_all/2, emit_info_all/4]).
 %% these must all be run inside a mnesia tx
 -export([has_for_source/1, remove_for_source/1,
          remove_for_destination/2, remove_transient_for_destination/1]).
@@ -61,7 +61,7 @@
 -spec add(rabbit_types:binding(), inner_fun(), rabbit_types:username()) -> bind_res().
 -spec remove(rabbit_types:binding())              -> bind_res().
 -spec remove(rabbit_types:binding(), inner_fun(), rabbit_types:username()) -> bind_res().
--spec list(rabbit_types:vhost()) -> bindings().
+-spec list(all | rabbit_types:vhost()) -> bindings().
 -spec list_for_source
         (rabbit_types:binding_source()) -> bindings().
 -spec list_for_destination
@@ -73,10 +73,10 @@
 -spec info(rabbit_types:binding()) -> rabbit_types:infos().
 -spec info(rabbit_types:binding(), rabbit_types:info_keys()) ->
           rabbit_types:infos().
--spec info_all(rabbit_types:vhost()) -> [rabbit_types:infos()].
--spec info_all(rabbit_types:vhost(), rabbit_types:info_keys()) ->
+-spec info_all(all | rabbit_types:vhost()) -> [rabbit_types:infos()].
+-spec info_all(all | rabbit_types:vhost(), rabbit_types:info_keys()) ->
           [rabbit_types:infos()].
--spec info_all(rabbit_types:vhost(), rabbit_types:info_keys(),
+-spec emit_info_all(all | rabbit_types:vhost(), rabbit_types:info_keys(),
                     reference(), pid()) -> 'ok'.
 -spec has_for_source(rabbit_types:binding_source()) -> boolean().
 -spec remove_for_source(rabbit_types:binding_source()) -> bindings().
@@ -226,7 +226,11 @@ remove(Src, Dst, B, ActingUser) ->
     process_deletions(Deletions, ActingUser).
 
 list(VHostPath) ->
-    VHostResource = rabbit_misc:r(VHostPath, '_'),
+    VHostPattern = case VHostPath of
+        all -> '_';
+        _   -> VHostPath
+    end,
+    VHostResource = rabbit_misc:r(VHostPattern, '_'),
     Route = #route{binding = #binding{source      = VHostResource,
                                       destination = VHostResource,
                                       _           = '_'},
@@ -289,7 +293,7 @@ info_all(VHostPath) -> map(VHostPath, fun (B) -> info(B) end).
 
 info_all(VHostPath, Items) -> map(VHostPath, fun (B) -> info(B, Items) end).
 
-info_all(VHostPath, Items, Ref, AggregatorPid) ->
+emit_info_all(VHostPath, Items, Ref, AggregatorPid) ->
     rabbit_control_misc:emitting_map(
       AggregatorPid, Ref, fun(B) -> info(B, Items) end, list(VHostPath)).
 

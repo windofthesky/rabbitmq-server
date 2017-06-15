@@ -22,7 +22,7 @@
          assert_equivalence/6, assert_args_equivalence/2, check_type/1,
          lookup/1, lookup_or_die/1, list/0, list/1, lookup_scratch/2,
          update_scratch/3, update_decorators/1, immutable/1,
-         info_keys/0, info/1, info/2, info_all/1, info_all/2, info_all/4,
+         info_keys/0, info/1, info/2, info_all/1, info_all/2, emit_info_all/4,
          route/2, delete/3, validate_binding/2]).
 -export([list_names/0]).
 %% these must be run inside a mnesia tx
@@ -63,7 +63,7 @@
                     rabbit_types:channel_exit().
 -spec list() -> [rabbit_types:exchange()].
 -spec list_names() -> [rabbit_exchange:name()].
--spec list(rabbit_types:vhost()) -> [rabbit_types:exchange()].
+-spec list(all | rabbit_types:vhost()) -> [rabbit_types:exchange()].
 -spec lookup_scratch(name(), atom()) ->
                                rabbit_types:ok(term()) |
                                rabbit_types:error('not_found').
@@ -79,10 +79,10 @@
 -spec info
         (rabbit_types:exchange(), rabbit_types:info_keys())
         -> rabbit_types:infos().
--spec info_all(rabbit_types:vhost()) -> [rabbit_types:infos()].
--spec info_all(rabbit_types:vhost(), rabbit_types:info_keys())
+-spec info_all(all | rabbit_types:vhost()) -> [rabbit_types:infos()].
+-spec info_all(all | rabbit_types:vhost(), rabbit_types:info_keys())
                    -> [rabbit_types:infos()].
--spec info_all(rabbit_types:vhost(), rabbit_types:info_keys(),
+-spec emit_info_all(all | rabbit_types:vhost(), rabbit_types:info_keys(),
                     reference(), pid())
                    -> 'ok'.
 -spec route(rabbit_types:exchange(), rabbit_types:delivery())
@@ -262,12 +262,17 @@ lookup_or_die(Name) ->
         {error, not_found} -> rabbit_misc:not_found(Name)
     end.
 
-list() -> mnesia:dirty_match_object(rabbit_exchange, #exchange{_ = '_'}).
+list() -> list(all).
 
 list_names() -> mnesia:dirty_all_keys(rabbit_exchange).
 
 %% Not dirty_match_object since that would not be transactional when used in a
 %% tx context
+list(all) ->
+    mnesia:async_dirty(
+        fun () ->
+            mnesia:match_object(rabbit_exchange, #exchange{_ = '_'}, read)
+        end);
 list(VHostPath) ->
     mnesia:async_dirty(
       fun () ->
@@ -368,7 +373,7 @@ info_all(VHostPath) -> map(VHostPath, fun (X) -> info(X) end).
 
 info_all(VHostPath, Items) -> map(VHostPath, fun (X) -> info(X, Items) end).
 
-info_all(VHostPath, Items, Ref, AggregatorPid) ->
+emit_info_all(VHostPath, Items, Ref, AggregatorPid) ->
     rabbit_control_misc:emitting_map(
       AggregatorPid, Ref, fun(X) -> info(X, Items) end, list(VHostPath)).
 
